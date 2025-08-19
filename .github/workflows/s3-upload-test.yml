@@ -72,6 +72,3 @@ jobs:
           fi
           aws s3 ls "s3://$BUCKET/$KEY"
           aws s3api head-object --bucket "$BUCKET" --key "$KEY"
-
-      - name: Object URL
-        run: echo "Uploaded: s3://$BUCKET/$KEY"
