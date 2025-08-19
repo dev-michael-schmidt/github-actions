@@ -1,0 +1,77 @@
+name: s3-upload-smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      aws_region:
+        description: "AWS region of the bucket"
+        required: true
+        default: "us-east-1"
+      bucket:
+        description: "S3 bucket name"
+        required: true
+      key:
+        description: "Object key to write"
+        required: true
+        default: "hello/hello.png"
+      kms_key_id:
+        description: "Optional KMS key ARN if bucket enforces SSE-KMS"
+        required: false
+
+env:
+  AWS_REGION: ${{ inputs.aws_region }}
+  BUCKET: ${{ inputs.bucket }}
+  KEY: ${{ inputs.key }}
+  KMS_KEY_ID: ${{ inputs.kms_key_id }}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install pillow
+
+      - name: Configure AWS (assume deploy role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Generate hello.png
+        run: |
+          python - <<'PY'
+          from PIL import Image, ImageDraw
+          w,h = 800, 400
+          img = Image.new("RGB",(w,h),(240,240,240))
+          d = ImageDraw.Draw(img)
+          d.text((40,160), "Hello, world!", fill=(0,0,0))
+          img.save("hello.png")
+          print("Wrote hello.png")
+          PY
+
+      - name: Upload to S3 (with diagnostics)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ls -l hello.png
+          aws sts get-caller-identity
+          aws s3api get-bucket-location --bucket "$BUCKET"
+          if [[ -n "${KMS_KEY_ID:-}" ]]; then
+            aws s3 cp hello.png "s3://$BUCKET/$KEY" --sse aws:kms --sse-kms-key-id "$KMS_KEY_ID"
+          else
+            aws s3 cp hello.png "s3://$BUCKET/$KEY"
+          fi
+          aws s3 ls "s3://$BUCKET/$KEY"
+          aws s3api head-object --bucket "$BUCKET" --key "$KEY"
+
+      - name: Object URL
+        run: echo "Uploaded: s3://$BUCKET/$KEY"
